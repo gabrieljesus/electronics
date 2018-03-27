@@ -1,177 +1,176 @@
-#include <everytime.h>
+#include "SevSeg.h"
+#include "SoftwareSerial.h"
 
-#include <LiquidCrystal.h>
+SevSeg display7seg;
 
-// initialize the library with the numbers of the interface pins
-LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+int pinBtn = A0;
+int pinLock = A1;
+int pinMotor = A2;
+int pinBuzzer = A3;
 
-// Analog input for buttons
-int button = A0;
+boolean motorOn = false;
+int seconds = 0;
+int minutes = 0;
 
-// Motor
-int motor = 7;
+char tempString[10];
 
-int hours;
-int minutes;
-int seconds;
-int hoursLimit = 3;
-
-int vHour = 20;
-int vMin = 150;
-int vSec = 250;
-int vOnOff = 500;
-
-boolean on = false;
-
-char *formated_hours = malloc(3);
-char *formated_minutes = malloc(3);
-char *formated_seconds = malloc(3);
-
-void setup() {
+void setup()
+{
+  pinMode(pinMotor, OUTPUT);
+  pinMode(pinBuzzer, OUTPUT);
+  stopCfa();
   Serial.begin(9600);
-  // Set up the button as input
-  pinMode(button, INPUT);
-  // Set up motor as output
-  pinMode(motor, OUTPUT);
   
-  // set up the number of columns and rows on the LCD
-  lcd.begin(16, 2);
-  clearAll();
+  // Common anode display
+  int displayType = COMMON_ANODE; 
+    
+  //Digit pin definition
+  int digit1 = 10; //first digit
+  int digit2 = 11; //second digit
+  int digit3 = 12; //third digit
+  int digit4 = 13; //fourth digit
+
+  int segA = 2; //segment A  
+  int segB = 3; //segment B
+  int segC = 4; //segment C
+  int segD = 5; //segment D
+  int segE = 6; //segment E
+  int segF = 7; //segment F
+  int segG = 8; //segment G
+  int segDP= 9; //segment H
+  
+  int numberOfDigits = 4;
+
+  //display initializing
+  display7seg.Begin(displayType, numberOfDigits, digit1, digit2, digit3, digit4, segA, segB, segC, segD, segE, segF, segG, segDP);
+  
+  //display brightness
+  display7seg.SetBrightness(50);
 }
 
-void clearAll() {
-  lcd.clear();
-
-  digitalWrite(motor, LOW);
+void loop()
+{
+  if(isOpen()) {
+    stopCfa();
+    sprintf(tempString, "OPEN");
+    display7seg.DisplayString(tempString, 0);
+  } else {
+    int val = analogRead(pinBtn);
   
-  hours = 0;
-  minutes = 0;
-  seconds = 0;
-
-  sprintf(formated_hours, "%02d", hours);
-  sprintf(formated_minutes, "%02d", minutes);
-  sprintf(formated_seconds, "%02d", seconds);
-  
-  lcd.print("Cycle time");
-  lcd.setCursor(0, 1);
-  lcd.print(formated_hours);
-  lcd.print(":");
-  lcd.print(formated_minutes);
-  lcd.print(":");
-  lcd.print(formated_seconds);
-
-  lcd.setCursor(9, 1);
-  lcd.print("OFF");
-}
-
-void loop() {
-  int buttonState = analogRead(button);
-  
-  if(buttonState > 0) {
-    Serial.println(buttonState);
-    if(!on) {
-      if(buttonState < vHour) {
-        hours++;
-        if(hours > hoursLimit)
-          hours = 0;
-        setHour();
-      } else if(buttonState < vMin) {
-        minutes++;
-        if(minutes > 59)
-          minutes = 0;
-        setMinute();
-      } else if(buttonState < vSec){
-        seconds++;
-        if(seconds > 59)
-          seconds = 0;
-        setSecond();
+    if(val > 0) {
+      Serial.println(val);
+      if(!motorOn) {
+        if(val > 1000 && val < 1010) { // 220 ohm
+          if(seconds == 0 && minutes > 0) {
+            minutes--;
+            seconds = 59;
+          } else if(seconds > 0)
+            seconds--;
+        }
+      
+        if(val > 925 && val < 940) { // 1k ohm
+          if(seconds == 59) {
+            minutes++;
+            seconds = 0;
+          } else {
+            seconds++;
+          }
+        }
+      
+        if(val > 90 && val < 95) { // 100k ohm
+          if(seconds >= 10)
+            seconds -= 10;
+        }
+      
+        if(val > 690 && val < 700) { // 4.6k ohm
+          seconds += 10;
+          if(seconds > 59) {
+            seconds = seconds - 60;
+            minutes++;
+          }
+        }
+    
+        if(val > 965 && val < 975) { // 560 ohm
+          if(minutes > 0)
+            minutes--;
+        }
+    
+        if(val > 1010 && val < 1014) {
+            minutes++;
+        }
+    
+        if(val > 1015 && val < 1020) {
+          if(minutes >= 10)
+            minutes -= 10;
+        }
+      }
+    
+      if(val > 1020) {
+        //minutes += 10;
+        turnOnOff();
+      }
+      
+      while(analogRead(pinBtn) > 0) {
+        delay(25);
       }
     }
     
-    if(buttonState >= vOnOff) {
-      if(hours != 0 || minutes != 0 || seconds != 0) {
-        turnOnOff();
-        unsigned int loops = getLoops();
-        for(unsigned int x = 0; x < loops; x++) {
-          if(seconds == 0) {
-            if(minutes == 0) {
-              if(hours == 0) {
-                turnOnOff();
-              } else {
-                hours--;
-                seconds = 59;
-                minutes = 59;
-                setHour();
-                setMinute();
-                setSecond();
-              }
-            } else {
-              minutes--;
-              seconds = 59;
-              setMinute();
-              setSecond();
-            }
-          } else {
-            seconds--;
-            setSecond();
-          }
+    sprintf(tempString, "%02d%02d", minutes, seconds);
+    display7seg.DisplayString(tempString, 2);
+  }
+  
+}
 
-          if(!wait()) {
-            break;
-          }
+void stopCfa() {
+  analogWrite(pinMotor, 0);
+  motorOn = false;
+}
+
+void startCfa() {
+  unsigned int loops = seconds + (minutes * 60);
+  Serial.print("Loops to run: ");
+  Serial.println(loops);
+  if(!isOpen()) {
+    analogWrite(pinMotor, 255);
+    motorOn = true;
+    for(unsigned int x = 0; x < loops; x++) {
+      if(seconds == 0) {
+        if(minutes == 0)
+          turnOnOff();
+        else {
+          minutes--;
+          seconds = 59;
         }
+      } else
+        seconds--;
+
+      setDisplay();
+      Serial.print("Loop: ");
+      Serial.println(x);
+      if(!wait()) {
+        break;
       }
-
-      if(seconds == 0 && minutes == 0 && hours == 0 && on)
-        turnOnOff();
     }
 
-    while(analogRead(button) > 0) {
-      delay(50);
+    if(seconds == 0 && minutes == 0 && motorOn) {
+      turnOnOff();
+      beep(3);
     }
   }
-}
-
-void turnOnOff() {
-  lcd.setCursor(9, 1);
-  if(on) {
-    lcd.print("OFF");
-    digitalWrite(motor, LOW);
-    on = false;
-  } else {
-    lcd.print("ON ");
-    digitalWrite(motor, HIGH);
-    on = true;
-  }
-}
-
-void setHour() {
-  sprintf(formated_hours, "%02d", hours);
-  lcd.setCursor(0, 1);
-  lcd.print(formated_hours);
-}
-
-void setMinute() {
-  sprintf(formated_minutes, "%02d", minutes);
-  lcd.setCursor(3, 1);
-  lcd.print(formated_minutes);
-}
-
-void setSecond() {
-  sprintf(formated_seconds, "%02d", seconds);
-  lcd.setCursor(6, 1);
-  lcd.print(formated_seconds);
-}
-
-unsigned int getLoops() {
-  return seconds + (minutes * 60) + (hours * 3600);
 }
 
 boolean wait() {
-  delay(250);
-  for(int x = 0; x < 15; x++) {
-    delay(50);
-    if(analogRead(button) >= vOnOff) {
+  delay(100);
+  for(int x = 0; x <= 105; x++) {
+    delay(1);
+    setDisplay();
+    
+    if(isOpen()) {
+      stopCfa();
+      return false;
+    }
+    
+    if(analogRead(pinBtn) >= 1020) {
       turnOnOff();
       return false;
     }
@@ -179,3 +178,31 @@ boolean wait() {
   return true;
 }
 
+void turnOnOff() {
+  if(motorOn)
+    stopCfa();
+  else
+    startCfa();
+}
+
+void setDisplay() {
+  sprintf(tempString, "%02d%02d", minutes, seconds);
+  display7seg.DisplayString(tempString, 2);
+}
+
+boolean isOpen() {
+  int lock = analogRead(pinLock);
+  if(lock > 30)
+    return true;
+  else
+    return false;
+}
+
+void beep(unsigned int times) {
+  for(unsigned int x = 0; x < times; x++) {
+    analogWrite(pinBuzzer, 255);
+    delay(200);
+    analogWrite(pinBuzzer, 0);
+    delay(200);
+  }
+}
